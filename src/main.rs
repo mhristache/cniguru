@@ -8,6 +8,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate failure;
 extern crate kubeclient;
+extern crate url;
 
 // modules
 mod error;
@@ -69,14 +70,16 @@ fn main() {
     }
 
     if args.cmd_pod {
-        let res = k8s::get_pod(args.arg_id, args.arg_namespace);
-        match res {
-            Ok(r) => println!("{:#?}", r),
-            Err(e) => write_err_and_exit(e, 1)
-        }
+        let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
+        let containers = pod.containers().unwrap();
+        println!("{:#?}", containers);
     } else if args.cmd_dc {
         unimplemented!();
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
     }
+}
+
+trait LinuxNamespace {
+    fn pid() -> u32;
 }
