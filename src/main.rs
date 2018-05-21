@@ -17,6 +17,7 @@ mod k8s;
 use docopt::Docopt;
 use failure::Error;
 use std::io::Write;
+use std::process::Command;
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
@@ -72,14 +73,65 @@ fn main() {
     if args.cmd_pod {
         let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
         let containers = pod.containers().unwrap();
-        println!("{:#?}", containers);
+        for container in containers {
+            println!("{:?}", container.pid());
+        }
     } else if args.cmd_dc {
-        unimplemented!();
+        let container = Container {
+            id: args.arg_id,
+            node_name: None,
+            runtime: ContainerRuntime::Docker,
+        };
+        println!("{:?}", container.pid());
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
     }
 }
 
-trait LinuxNamespace {
-    fn pid() -> u32;
+#[derive(Debug)]
+pub enum ContainerRuntime {
+    Docker,
+}
+
+#[derive(Debug)]
+pub struct Container {
+    pub id: String,
+    pub node_name: Option<String>,
+    pub runtime: ContainerRuntime,
+}
+
+impl Container {
+    fn pid(&self) -> Result<u32, Error> {
+        match self.runtime {
+            ContainerRuntime::Docker => {
+                // fetch the PID using docker CLI
+                // a docker client is not currently used as it's hard to find a lightweight
+                // and good enough one in the rust ecosystem
+                debug!("trying to find the pid for docker container {}", &self.id);
+                //let cmd = format!("/usr/bin/docker inspect {} --format '{{.State.Pid}}'", &self.id);
+                let output = Command::new("docker")
+                    .arg("inspect")
+                    .arg(&self.id)
+                    .arg("--format")
+                    .arg("{{.State.Pid}}")
+                    .output()?;
+
+                if output.status.success() {
+                    let so = std::str::from_utf8(&output.stdout[..])?.trim();
+                    debug!("cmd stdout: {}", so);
+                    let pid: u32 = so.parse()?;
+                    Ok(pid)
+                } else {
+                    let se = std::str::from_utf8(&output.stderr[..])?;
+                    let details = format!(
+                        "docker inspect failed for container {} with code {:?}, error: {}",
+                        &self.id,
+                        output.status.code(),
+                        se
+                    );
+                    Err(error::DockerError::DockerCommandError { details })?
+                }
+            }
+        }
+    }
 }

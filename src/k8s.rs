@@ -1,5 +1,5 @@
 use super::error::K8sError;
-use super::LinuxNamespace;
+use super::{Container, ContainerRuntime};
 use failure::{Error, ResultExt};
 use kubeclient::{self, prelude::*};
 use std::env;
@@ -56,36 +56,16 @@ impl<'a> Pod<'a> {
     fn get_pod(&self) -> Result<kubeclient::resources::Pod, K8sError> {
         let cfg = self.get_kubeconfig_path()?;
         let kube = Kubernetes::load_conf(&cfg)?;
-
         let pod = kube.namespace(self.namespace).pods().get(self.name)?;
-
         trace!("k8s response:\n{:#?}", pod);
-
         Ok(pod)
     }
 
+    /// Extract info about the containers in the pod
     pub fn containers(&self) -> Result<Vec<Container>, Error> {
         let pod = self.get_pod()?;
         extract_container_info(pod)
     }
-}
-
-impl LinuxNamespace for Container {
-    fn pid() -> u32 {
-        unimplemented!()
-    }
-}
-
-#[derive(Debug)]
-pub enum ContainerRuntime {
-    Docker,
-}
-
-#[derive(Debug)]
-pub struct Container {
-    id: String,
-    node_name: String,
-    runtime: ContainerRuntime,
 }
 
 /// Extract the IDs of the containers part of the given pod
@@ -136,12 +116,7 @@ fn extract_container_info(pod: kubeclient::resources::Pod) -> Result<Vec<Contain
                             };
                         let entry = Container {
                             id: container_id,
-                            node_name: pod
-                                .spec
-                                .node_name
-                                .as_ref()
-                                .expect("pod.spec.node_name is null")
-                                .clone(),
+                            node_name: pod.spec.node_name.clone(),
                             runtime: runtime,
                         };
                         res.push(entry);

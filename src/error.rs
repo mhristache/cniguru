@@ -17,3 +17,9 @@ impl From<kubeclient::errors::Error> for K8sError {
         K8sError::KubeclientError(err.to_string())
     }
 }
+
+#[derive(Debug, Fail)]
+pub enum DockerError {
+    #[fail(display = "error when running docker command: {}", details)]
+    DockerCommandError { details: String },
+}
