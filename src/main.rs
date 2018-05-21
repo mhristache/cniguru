@@ -18,6 +18,9 @@ use docopt::Docopt;
 use failure::Error;
 use std::io::Write;
 use std::process::Command;
+use std::path::PathBuf;
+use std::fs;
+use std::os::unix::fs::symlink;
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
@@ -74,7 +77,9 @@ fn main() {
         let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
         let containers = pod.containers().unwrap();
         for container in containers {
-            println!("{:?}", container.pid());
+            let pid = container.pid().unwrap();
+            let s = get_host_ifs_for_netns_pid(pid).unwrap();
+            println!("{:?}", s);
         }
     } else if args.cmd_dc {
         let container = Container {
@@ -82,7 +87,9 @@ fn main() {
             node_name: None,
             runtime: ContainerRuntime::Docker,
         };
-        println!("{:?}", container.pid());
+        let pid = container.pid().unwrap();
+        let s = get_host_ifs_for_netns_pid(pid).unwrap();
+        println!("{:?}", s);
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
     }
@@ -133,5 +140,44 @@ impl Container {
                 }
             }
         }
+    }
+}
+
+// find all interfaces for a network namespace
+fn get_host_ifs_for_netns_pid(pid: u32) -> Result<String, Error> {
+    // a link from /proc/<pid>/ns/net to /var/run/netns/<some id> must exist
+    // so that `ip netns` commands can be used
+
+    let dst_dir = PathBuf::from("/var/run/netns/");
+    let dst_path = dst_dir.join(format!("ns-{}", pid));
+    let src_path = PathBuf::from(format!("/proc/{}/ns/net", pid));
+
+    let mut cleanup_needed = false;
+    if !dst_path.exists() {
+        fs::create_dir_all(dst_dir.as_path())?;
+        symlink(src_path, dst_path.as_path())?;
+        cleanup_needed = true;
+    }
+
+    debug!("trying to find the namespace id for pid {}", pid);
+
+    let cmd = format!("ip netns identify {}", pid);
+    let output = Command::new("ip")
+        .arg("netns")
+        .arg("identify")
+        .arg(pid.to_string())
+        .output()?;
+
+    if output.status.success() {
+        let so = std::str::from_utf8(&output.stdout[..])?.trim();
+        debug!("ns: {}", so);
+        if cleanup_needed {
+            fs::remove_file(dst_path)?;
+            fs::remove_dir(dst_dir)?;
+        }
+        Ok(so.to_string())
+    } else {
+        let se = std::str::from_utf8(&output.stderr[..])?;
+        Err(error::LinuxIpCmdError {cmd: cmd, code: output.status.code(), stderr: se.to_string()})?
     }
 }

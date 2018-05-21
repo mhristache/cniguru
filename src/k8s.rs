@@ -18,7 +18,7 @@ impl<'a> Pod<'a> {
             Some(ns) => ns,
             None => "default",
         };
-        debug!(" pod {}, namespace {}", name, namespace);
+        debug!("pod {}, namespace {}", name, namespace);
         Self { name, namespace }
     }
 

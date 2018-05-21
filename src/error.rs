@@ -23,3 +23,12 @@ pub enum DockerError {
     #[fail(display = "error when running docker command: {}", details)]
     DockerCommandError { details: String },
 }
+
+
+#[derive(Debug, Fail)]
+#[fail(display = "error when running '{}': code {:?}, error: {}", cmd, code, stderr)]
+pub struct LinuxIpCmdError {
+    pub cmd: String,
+    pub code: Option<i32>,
+    pub stderr: String
+}
