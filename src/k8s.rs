@@ -4,6 +4,7 @@ use failure::{Error, ResultExt};
 use kubeclient::{self, prelude::*};
 use std::env;
 use url::Url;
+use std::fs::File;
 
 pub struct Pod<'a> {
     name: &'a str,
@@ -23,8 +24,9 @@ impl<'a> Pod<'a> {
 
     /// Return the path to the config file as String
     ///
-    /// By default, look for a file named `config` in the `$HOME/.kube` directory.
-    /// The user can specify other kubeconfig files by setting the `KUBECONFIG` environment variable
+    /// The user can specify a kubeconfig file by setting the `KUBECONFIG` environment variable
+    /// If no file is specified, look for a file named `config` in the `$HOME/.kube` directory.
+    /// Next, try to use `/etc/kubernetes/admin.conf` and see if that works out
     fn get_kubeconfig_path(&self) -> Result<String, K8sError> {
         let key = "KUBECONFIG";
         match env::var(key) {
@@ -40,14 +42,27 @@ impl<'a> Pod<'a> {
                         true => {
                             let cfg = cfg_file_path.to_string_lossy().to_string();
                             debug!("using kubeconfig: {}", cfg);
-                            Ok(cfg)
+                            return Ok(cfg);
                         }
-                        false => Err(K8sError::KubeconfigMissing),
+                        false => debug!("$HOME/.kube/config does not exist or is not a file"),
                     }
                 } else {
-                    warn!("could not find the user home directory");
-                    Err(K8sError::KubeconfigMissing)
+                    debug!("could not find the user's home directory");
                 }
+
+                // use `/etc/kubernetes/admin.conf` if it exist and the user can open it
+                let file = "/etc/kubernetes/admin.conf";
+                match File::open(file) {
+                    Ok(_) => {
+                        debug!("using kubeconfig from {}", file);
+                        Ok(file.to_string())
+                    },
+                    Err(e) => {
+                        debug!("Failed to open {}: {}", file, e);
+                        Err(K8sError::KubeconfigMissing)
+                    }
+                }
+
             }
         }
     }
