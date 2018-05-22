@@ -8,7 +8,10 @@ extern crate serde_derive;
 #[macro_use]
 extern crate failure;
 extern crate kubeclient;
+extern crate regex;
 extern crate url;
+#[macro_use]
+extern crate lazy_static;
 
 // modules
 mod error;
@@ -16,11 +19,11 @@ mod k8s;
 
 use docopt::Docopt;
 use failure::Error;
-use std::io::Write;
-use std::process::Command;
-use std::path::PathBuf;
+use regex::Regex;
 use std::fs;
 use std::os::unix::fs::symlink;
+use std::path::PathBuf;
+use std::process::Command;
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
@@ -52,15 +55,7 @@ struct Args {
     flag_version: bool,
 }
 
-fn write_err_and_exit(e: Error, code: i32) -> ! {
-    debug!("error details: {:?}", e);
-    if let Err(_) = write!(std::io::stderr(), "Error: {}\n", e) {
-        panic!("could not write to stderr");
-    }
-    std::process::exit(code);
-}
-
-fn main() {
+fn main() -> Result<(), Error> {
     env_logger::init();
 
     let args: Args = Docopt::new(USAGE)
@@ -70,16 +65,15 @@ fn main() {
 
     if args.flag_version {
         println!("{}", version());
-        return;
+        return Ok(());
     }
 
     if args.cmd_pod {
         let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
-        let containers = pod.containers().unwrap();
+        let containers = pod.containers()?;
         for container in containers {
-            let pid = container.pid().unwrap();
-            let s = get_host_ifs_for_netns_pid(pid).unwrap();
-            println!("{:?}", s);
+            let intfs = container.netns()?.interfaces()?;
+            println!("{}", intfs.join("\n"));
         }
     } else if args.cmd_dc {
         let container = Container {
@@ -87,12 +81,12 @@ fn main() {
             node_name: None,
             runtime: ContainerRuntime::Docker,
         };
-        let pid = container.pid().unwrap();
-        let s = get_host_ifs_for_netns_pid(pid).unwrap();
-        println!("{:?}", s);
+        let intfs = container.netns()?.interfaces()?;
+        println!("{}", intfs.join("\n"));
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
     }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -115,69 +109,140 @@ impl Container {
                 // a docker client is not currently used as it's hard to find a lightweight
                 // and good enough one in the rust ecosystem
                 debug!("trying to find the pid for docker container {}", &self.id);
-                //let cmd = format!("/usr/bin/docker inspect {} --format '{{.State.Pid}}'", &self.id);
-                let output = Command::new("docker")
-                    .arg("inspect")
-                    .arg(&self.id)
-                    .arg("--format")
-                    .arg("{{.State.Pid}}")
-                    .output()?;
+                let cmd = format!("docker inspect {} --format '{{{{.State.Pid}}}}'", &self.id);
+                let output = run_host_cmd(&cmd)?;
+                let pid: u32 = output.trim_matches('\'').parse()?;
+                Ok(pid)
+            }
+        }
+    }
 
-                if output.status.success() {
-                    let so = std::str::from_utf8(&output.stdout[..])?.trim();
-                    debug!("cmd stdout: {}", so);
-                    let pid: u32 = so.parse()?;
-                    Ok(pid)
-                } else {
-                    let se = std::str::from_utf8(&output.stderr[..])?;
-                    let details = format!(
-                        "docker inspect failed for container {} with code {:?}, error: {}",
-                        &self.id,
-                        output.status.code(),
-                        se
-                    );
-                    Err(error::DockerError::DockerCommandError { details })?
-                }
+    // get the linux netns for this container
+    fn netns(&self) -> Result<Netns, Error> {
+        let pid = self.pid()?;
+        Ok(Netns::new(pid))
+    }
+}
+
+struct Netns {
+    pid: u32,
+    rmdir_needed: bool,
+    rmlink_needed: bool,
+    dst_path: PathBuf,
+    src_path: PathBuf,
+}
+
+impl Netns {
+    fn new(pid: u32) -> Self {
+        Self {
+            pid: pid,
+            rmdir_needed: false,
+            rmlink_needed: false,
+            dst_path: PathBuf::from(format!("/var/run/netns/ns-{}", pid)),
+            src_path: PathBuf::from(format!("/proc/{}/ns/net", pid)),
+        }
+    }
+
+    fn interfaces(&mut self) -> Result<Vec<String>, Error> {
+        // a link from /proc/<pid>/ns/net to /var/run/netns/<some id> must exist
+        // so that `ip netns` commands can be used
+        let parent_dir = self.dst_path.parent().unwrap();
+        if !parent_dir.exists() {
+            fs::create_dir_all(parent_dir)?;
+            self.rmdir_needed = true;
+        }
+
+        if !self.dst_path.exists() {
+            symlink(self.src_path.as_path(), self.dst_path.as_path())?;
+            self.rmlink_needed = true;
+        }
+
+        debug!("trying to find the namespace id for pid {}", self.pid);
+        let cmd = format!("ip netns identify {}", self.pid);
+        let output = run_host_cmd(&cmd)?;
+
+        debug!("trying to find link-netnsid for ns {}", &output);
+        let cmd = format!("ip netns list | grep {}", &output);
+        let output = run_host_cmd(&cmd)?;
+
+        // the expected format of the output is something like `ns-56316 (id: 6)`
+        debug!("extracting the link-netnsid from {}", &output);
+        lazy_static! {
+            static ref RE1: Regex = Regex::new(r"\(id: (\d+)\)").unwrap();
+        }
+        let id: u32 = match RE1.captures(&output).and_then(|m| m.get(1)) {
+            Some(v) => v.as_str().parse()?,
+            None => return Err(error::DataExtractionError::OutputParsingError(cmd))?,
+        };
+
+        debug!("trying to find the interfaces with link-netnsid {}", &id);
+        let cmd = format!("ip link show | grep -B1 \"link-netnsid {}\"", id);
+        let output = run_host_cmd(&cmd)?;
+
+        debug!("parsing ip link printout for link-netnsid {}", &id);
+        lazy_static! {
+            static ref RE2: Regex = Regex::new(r"\d+:\s+(\w+)@\w+:\s").unwrap();
+        }
+        let mut res = vec![];
+        for m in RE2.captures_iter(&output) {
+            match m.get(1) {
+                Some(v) => res.push(v.as_str().to_string()),
+                None => return Err(error::DataExtractionError::OutputParsingError(cmd))?,
+            }
+        }
+        Ok(res)
+    }
+}
+
+impl Drop for Netns {
+    /// Drop is used to remove files created by self.interfaces() logic
+    fn drop(&mut self) {
+        if self.rmlink_needed {
+            match fs::remove_file(self.dst_path.as_path()) {
+                Ok(_) => debug!("symlink removed successfully"),
+                Err(e) => debug!("failed to remove the symlink: {}", e),
+            }
+        }
+        if self.rmdir_needed {
+            let parent_dir = self.dst_path.parent().unwrap();
+            match fs::remove_dir(parent_dir) {
+                Ok(_) => debug!("parent dir removed successfully"),
+                Err(e) => debug!("failed to remove the parent dir: {}", e),
             }
         }
     }
 }
 
-// find all interfaces for a network namespace
-fn get_host_ifs_for_netns_pid(pid: u32) -> Result<String, Error> {
-    // a link from /proc/<pid>/ns/net to /var/run/netns/<some id> must exist
-    // so that `ip netns` commands can be used
+/// Run a command on the host and return the trimmed output.
+/// Raise an error if the command did not run successfully
+fn run_host_cmd(cmd: &str) -> Result<String, Error> {
+    let cmd_parts: Vec<&str> = cmd.split(' ').collect();
 
-    let dst_dir = PathBuf::from("/var/run/netns/");
-    let dst_path = dst_dir.join(format!("ns-{}", pid));
-    let src_path = PathBuf::from(format!("/proc/{}/ns/net", pid));
+    // the first element of the vec is the name of the program to run and the rest are arguments
+    let (prog, args) = match cmd_parts.as_slice().split_first() {
+        Some(v) => v,
+        None => Err(error::HostCmdError::CmdInvalid(cmd.to_string()))?,
+    };
+    debug!("running '{}' with args {:?}", prog, args);
 
-    let mut cleanup_needed = false;
-    if !dst_path.exists() {
-        fs::create_dir_all(dst_dir.as_path())?;
-        symlink(src_path, dst_path.as_path())?;
-        cleanup_needed = true;
-    }
+    let output = Command::new(prog).args(args).output()?;
 
-    debug!("trying to find the namespace id for pid {}", pid);
-
-    let cmd = format!("ip netns identify {}", pid);
-    let output = Command::new("ip")
-        .arg("netns")
-        .arg("identify")
-        .arg(pid.to_string())
-        .output()?;
+    let se = std::str::from_utf8(&output.stderr[..])?.trim();
+    let so = std::str::from_utf8(&output.stdout[..])?.trim();
+    trace!("\nstdout: {}\nstderr: {}", so, se);
 
     if output.status.success() {
-        let so = std::str::from_utf8(&output.stdout[..])?.trim();
-        debug!("ns: {}", so);
-        if cleanup_needed {
-            fs::remove_file(dst_path)?;
-            fs::remove_dir(dst_dir)?;
-        }
         Ok(so.to_string())
     } else {
-        let se = std::str::from_utf8(&output.stderr[..])?;
-        Err(error::LinuxIpCmdError {cmd: cmd, code: output.status.code(), stderr: se.to_string()})?
+        let code = output
+            .status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or("N/A".to_string());
+        Err(error::HostCmdError::CmdFailed {
+            cmd: cmd.to_string(),
+            code,
+            stderr: se.to_string(),
+        })?
     }
 }

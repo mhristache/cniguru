@@ -3,8 +3,8 @@ use super::{Container, ContainerRuntime};
 use failure::{Error, ResultExt};
 use kubeclient::{self, prelude::*};
 use std::env;
-use url::Url;
 use std::fs::File;
+use url::Url;
 
 pub struct Pod<'a> {
     name: &'a str,
@@ -56,13 +56,12 @@ impl<'a> Pod<'a> {
                     Ok(_) => {
                         debug!("using kubeconfig from {}", file);
                         Ok(file.to_string())
-                    },
+                    }
                     Err(e) => {
                         debug!("Failed to open {}: {}", file, e);
                         Err(K8sError::KubeconfigMissing)
                     }
                 }
-
             }
         }
     }
@@ -78,7 +77,7 @@ impl<'a> Pod<'a> {
 
     /// Extract info about the containers in the pod
     pub fn containers(&self) -> Result<Vec<Container>, Error> {
-        let pod = self.get_pod()?;
+        let pod = self.get_pod().context("fetching pod info using k8s api")?;
         extract_container_info(pod)
     }
 }

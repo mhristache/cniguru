@@ -19,16 +19,20 @@ impl From<kubeclient::errors::Error> for K8sError {
 }
 
 #[derive(Debug, Fail)]
-pub enum DockerError {
-    #[fail(display = "error when running docker command: {}", details)]
-    DockerCommandError { details: String },
+pub enum HostCmdError {
+    #[fail(display = "command'{}' failed with code {}: {}", cmd, code, stderr)]
+    CmdFailed {
+        cmd: String,
+        code: String,
+        stderr: String,
+    },
+
+    #[fail(display = "invalid command: '{}'", _0)]
+    CmdInvalid(String),
 }
 
-
 #[derive(Debug, Fail)]
-#[fail(display = "error when running '{}': code {:?}, error: {}", cmd, code, stderr)]
-pub struct LinuxIpCmdError {
-    pub cmd: String,
-    pub code: Option<i32>,
-    pub stderr: String
+pub enum DataExtractionError {
+    #[fail(display = "failed to parse the output of '{}'", _0)]
+    OutputParsingError(String),
 }
