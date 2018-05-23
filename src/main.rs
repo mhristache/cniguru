@@ -175,19 +175,22 @@ impl Netns {
             None => return Err(error::DataExtractionError::OutputParsingError(cmd))?,
         };
 
-        debug!("trying to find the interfaces with link-netnsid {}", &id);
-        let cmd = format!("ip link show | grep -B1 \"link-netnsid {}\"", id);
-        let output = run_host_cmd(&cmd)?;
+        debug!("fetching ip link printout");
+        let cmd = "ip link show";
+        let output = run_host_cmd(cmd)?;
 
-        debug!("parsing ip link printout for link-netnsid {}", &id);
-        lazy_static! {
-            static ref RE2: Regex = Regex::new(r"\d+:\s+(\w+)@\w+:\s").unwrap();
-        }
+        debug!("parsing ip link printout to check for link-netnsid {}", &id);
         let mut res = vec![];
-        for m in RE2.captures_iter(&output) {
+        let s = format!(r"\d+:\s+(\w+)@\w+:.*\s*link/ether.*link-netnsid {}\s", &id);
+        let re = Regex::new(&s).unwrap();
+        for m in re.captures_iter(&output) {
             match m.get(1) {
                 Some(v) => res.push(v.as_str().to_string()),
-                None => return Err(error::DataExtractionError::OutputParsingError(cmd))?,
+                None => {
+                    return Err(error::DataExtractionError::OutputParsingError(
+                        cmd.to_string(),
+                    ))?
+                }
             }
         }
         Ok(res)
