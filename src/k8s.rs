@@ -1,14 +1,14 @@
 use super::error::K8sError;
 use super::{Container, ContainerRuntime};
-use failure::{Error, ResultExt};
+use failure::Error;
 use kubeclient::{self, prelude::*};
 use std::env;
 use std::fs::File;
 use url::Url;
 
 pub struct Pod<'a> {
-    name: &'a str,
-    namespace: &'a str,
+    pub name: &'a str,
+    pub namespace: &'a str,
 }
 
 impl<'a> Pod<'a> {
@@ -77,7 +77,7 @@ impl<'a> Pod<'a> {
 
     /// Extract info about the containers in the pod
     pub fn containers(&self) -> Result<Vec<Container>, Error> {
-        let pod = self.get_pod().context("fetching pod info using k8s api")?;
+        let pod = self.get_pod()?;
         extract_container_info(pod)
     }
 }
@@ -91,7 +91,7 @@ fn extract_container_info(pod: kubeclient::resources::Pod) -> Result<Vec<Contain
                 Some(objs) => {
                     for (idx, obj) in objs.iter().enumerate() {
                         // the json path to the object, used for details about errors
-                        let obj_path = format!("pod.status.container_statuses.{}", idx);
+                        let obj_path = format!("pod.status.container_statuses.{}.containerID", idx);
                         let (runtime, container_id) =
                             match obj.get("containerID").and_then(|x| x.as_str()) {
                                 Some(raw_cid) => {
@@ -101,32 +101,22 @@ fn extract_container_info(pod: kubeclient::resources::Pod) -> Result<Vec<Contain
 
                                     let runtime = match cid.scheme() {
                                         "docker" => ContainerRuntime::Docker,
-                                        other @ _ => {
-                                            let ctx = format!(
-                                                "{}.containerID has an unsupported runtime: {}",
-                                                &obj_path, other
-                                            );
-                                            Err(K8sError::PodContainerDataError).context(ctx)?
-                                        }
+                                        other @ _ => Err(K8sError::UnsupportedContainerRuntime(
+                                            other.to_string(),
+                                        ))?,
                                     };
 
                                     let id = match cid.host_str() {
                                         Some(s) => s.to_string(),
-                                        None => {
-                                            let ctx = format!(
-                                                "{}.containerID has an unsupported format: {}",
-                                                &obj_path, &raw_cid
-                                            );
-                                            Err(K8sError::PodContainerDataError).context(ctx)?
-                                        }
+                                        None => Err(K8sError::UnsupportedFieldFormat {
+                                            field: obj_path,
+                                            val: raw_cid.to_string(),
+                                        })?,
                                     };
 
                                     (runtime, id)
                                 }
-                                None => {
-                                    let ctx = format!("{}.containerID is null", &obj_path);
-                                    Err(K8sError::PodContainerDataError).context(ctx)?
-                                }
+                                None => Err(K8sError::MissingOrNullField(obj_path))?,
                             };
                         let entry = Container {
                             id: container_id,
@@ -136,15 +126,12 @@ fn extract_container_info(pod: kubeclient::resources::Pod) -> Result<Vec<Contain
                         res.push(entry);
                     }
                 }
-                None => {
-                    Err(K8sError::PodContainerDataError)
-                        .context("pod.status.container_statuses is null")?;
-                }
+                None => Err(K8sError::MissingOrNullField(
+                    "pod.status.container_statuses".to_string(),
+                ))?,
             }
         }
-        None => {
-            Err(K8sError::PodContainerDataError).context("pod.status is null")?;
-        }
+        None => Err(K8sError::MissingOrNullField("pod.status".to_string()))?,
     }
     Ok(res)
 }

@@ -12,13 +12,15 @@ extern crate regex;
 extern crate url;
 #[macro_use]
 extern crate lazy_static;
+extern crate exitfailure;
 
 // modules
 mod error;
 mod k8s;
 
 use docopt::Docopt;
-use failure::Error;
+use exitfailure::ExitFailure;
+use failure::{Error, ResultExt};
 use regex::Regex;
 use std::fs;
 use std::os::unix::fs::symlink;
@@ -55,7 +57,7 @@ struct Args {
     flag_version: bool,
 }
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), ExitFailure> {
     env_logger::init();
 
     let args: Args = Docopt::new(USAGE)
@@ -70,10 +72,13 @@ fn main() -> Result<(), Error> {
 
     if args.cmd_pod {
         let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
-        let containers = pod.containers()?;
+        let err_ctx = format!(
+            "failed to get info about containers in pod '{}' on namespace '{}'",
+            pod.name, pod.namespace
+        );
+        let containers = pod.containers().context(err_ctx)?;
         for container in containers {
-            let intfs = container.netns()?.interfaces()?;
-            println!("{}", intfs.join("\n"));
+            gen_output_for_container(container)?;
         }
     } else if args.cmd_dc {
         let container = Container {
@@ -81,11 +86,25 @@ fn main() -> Result<(), Error> {
             node_name: None,
             runtime: ContainerRuntime::Docker,
         };
-        let intfs = container.netns()?.interfaces()?;
-        println!("{}", intfs.join("\n"));
+        gen_output_for_container(container)?;
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
     }
+    Ok(())
+}
+
+// generate the output for the given container
+fn gen_output_for_container(container: Container) -> Result<(), Error> {
+    let ctx1 = format!(
+        "failed to find the namespace for container id {}",
+        &container.id
+    );
+    let ctx2 = format!(
+        "failed to find the host interfaces for container id {}",
+        &container.id
+    );
+    let intfs = container.netns().context(ctx1)?.interfaces().context(ctx2)?;
+    println!("{}", intfs.join("\n"));
     Ok(())
 }
 

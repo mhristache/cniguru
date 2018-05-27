@@ -5,11 +5,19 @@ pub enum K8sError {
     #[fail(display = "{}", _0)]
     KubeclientError(String),
 
-    #[fail(display = "kubernetes config not found")]
+    #[fail(
+        display = "kubernetes config not specified using $KUBECONFIG env var and could not open either $HOME/.kube/config or /etc/kubernetes/admin.conf"
+    )]
     KubeconfigMissing,
 
-    #[fail(display = "could not extract needed data about containers in the pod")]
-    PodContainerDataError,
+    #[fail(display = "container has an unsupported runtime: {}", _0)]
+    UnsupportedContainerRuntime(String),
+
+    #[fail(display = "field {} has an unsupported format: {}", field, val)]
+    UnsupportedFieldFormat { field: String, val: String },
+
+    #[fail(display = "field {} is missing or is null", _0)]
+    MissingOrNullField(String),
 }
 
 impl From<kubeclient::errors::Error> for K8sError {
