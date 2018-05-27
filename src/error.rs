@@ -44,3 +44,10 @@ pub enum DataExtractionError {
     #[fail(display = "failed to parse the output of '{}'", _0)]
     OutputParsingError(String),
 }
+
+#[derive(Debug, Fail, Copy, Clone)]
+#[fail(
+    display = "failed to extract interfaces belonging to link-netnsid {} from the output of 'ip link show'",
+    _0
+)]
+pub struct IntfMatchError(pub u32);
