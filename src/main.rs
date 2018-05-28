@@ -16,14 +16,16 @@ extern crate lazy_static;
 // modules
 mod error;
 mod k8s;
+mod tests;
 
 use docopt::Docopt;
-use failure::{Error, ResultExt};
+use failure::{Error, ResultExt, Fail};
 use regex::Regex;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
+use std::io::Write;
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
@@ -55,7 +57,7 @@ struct Args {
     flag_version: bool,
 }
 
-fn main() -> Result<(), Error> {
+fn main() {
     env_logger::init();
 
     let args: Args = Docopt::new(USAGE)
@@ -63,6 +65,22 @@ fn main() -> Result<(), Error> {
         .unwrap_or_else(|e| e.exit());
     debug!("program args: {:?}", args);
 
+    if let Err(e) = try_main(args) {
+        let mut fail: &Fail = e.cause();
+        let mut f = std::io::stderr();
+        write!(std::io::stderr(), "error: {}\n", fail).expect("could not write to stderr");
+        while let Some(cause) = fail.cause() {
+            write!(f, "caused by: {}\n", cause).expect("could not write to stderr");
+            fail = cause;
+        }
+        if std::env::var("RUST_BACKTRACE").is_ok() {
+            write!(f, "{}\n", e.backtrace()).expect("could not write to stderr");
+        }
+        std::process::exit(1);
+    }
+}
+
+fn try_main(args: Args) -> Result<(), Error> {
     if args.flag_version {
         println!("{}", version());
         return Ok(());
@@ -87,6 +105,7 @@ fn main() -> Result<(), Error> {
         gen_output_for_container(container)?;
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -211,7 +230,13 @@ impl Netns {
 fn parse_ip_link_printout(printout: &str, id: u32) -> Result<Vec<Intf>, Error> {
     debug!("parsing ip link printout to check for link-netnsid {}", &id);
     let mut res = vec![];
-    let s = format!(r"\d+:\s+(?P<name>\w+)@\w+:.*\s+mtu\s+(?P<mtu>\d+)\s+(?:.*\s+master\s+(?P<br>\w+)\s+)?.*\s+link/ether\s+(?P<mac>(\w|:)+)\s+.*link-netnsid {}", &id);
+    let s = concat!(
+        r"\d+:\s+(?P<name>\w+)@\w+:",
+        r".*\s+mtu\s+(?P<mtu>\d+)\s+",
+        r"(?:.*\s+master\s+(?P<br>\w+)\s+)?",
+        r".*\s+link/ether\s+(?P<mac>(\w|:)+)\s+",
+        r".*link-netnsid");
+    let s = format!("{} {}", s, id);
     let re = Regex::new(&s).unwrap();
     let err = error::IntfMatchError(id);
     for m in re.captures_iter(printout) {
@@ -283,33 +308,3 @@ fn run_host_cmd(cmd: &str) -> Result<String, Error> {
     }
 }
 
-#[test]
-fn test_parse_ip_link_output() {
-    let s = r#"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
-    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-2: vethc3cef48b@if3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default
-    link/ether e6:93:28:78:39:99 brd ff:ff:ff:ff:ff:ff link-netnsid 0
-3: enp0s31f6: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq_codel state DOWN mode DEFAULT group default qlen 1000
-    link/ether c8:5b:76:72:53:46 brd ff:ff:ff:ff:ff:ff
-4: wlp3s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP mode DORMANT group default qlen 1000
-    link/ether e4:a7:a0:61:3d:3e brd ff:ff:ff:ff:ff:ff
-9: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default
-    link/ether 02:42:1b:7f:0d:5e brd ff:ff:ff:ff:ff:ff
-11: wwp0s20f0u5c2: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
-    link/ether 02:1e:10:1f:00:00 brd ff:ff:ff:ff:ff:ff
-12: flannel.1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN mode DEFAULT group default
-    link/ether da:1f:7a:e1:59:58 brd ff:ff:ff:ff:ff:ff
-13: cni0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000
-    link/ether 5a:02:70:6b:57:1e brd ff:ff:ff:ff:ff:ff
-14: veth551a254e@if3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default
-    link/ether 12:56:7d:9f:80:15 brd ff:ff:ff:ff:ff:ff link-netnsid 1"#;
-
-    let exp = vec![Intf {
-        name: "veth551a254e".into(),
-        bridge: Some("cni0".into()),
-        mtu: 1450,
-        mac_address: "12:56:7d:9f:80:15".into(),
-    }];
-    let got = parse_ip_link_printout(s, 1).unwrap();
-    assert_eq!(exp, got);
-}
