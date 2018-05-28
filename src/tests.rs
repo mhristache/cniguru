@@ -21,12 +21,14 @@ fn test_parse_ip_link_printout() {
 14: veth551a254e@if3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default
     link/ether 12:56:7d:9f:80:15 brd ff:ff:ff:ff:ff:ff link-netnsid 1"#;
 
-    let exp = vec![Intf {
-        name: "veth551a254e".into(),
-        bridge: Some("cni0".into()),
-        mtu: 1450,
-        mac_address: "12:56:7d:9f:80:15".into(),
-    }];
+    let exp = vec![
+        Intf {
+            name: "veth551a254e".into(),
+            bridge: Some("cni0".into()),
+            mtu: 1450,
+            mac_address: "12:56:7d:9f:80:15".into(),
+        },
+    ];
 
     let got = parse_ip_link_printout(s, 1).unwrap();
 

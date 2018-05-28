@@ -5,9 +5,7 @@ pub enum K8sError {
     #[fail(display = "{}", _0)]
     KubeclientError(String),
 
-    #[fail(
-        display = "kubernetes config not specified using $KUBECONFIG env var and could not open either $HOME/.kube/config or /etc/kubernetes/admin.conf"
-    )]
+    #[fail(display = "kubernetes config not specified using $KUBECONFIG env var and could not open either $HOME/.kube/config or /etc/kubernetes/admin.conf")]
     KubeconfigMissing,
 
     #[fail(display = "container has an unsupported runtime: {}", _0)]
@@ -46,8 +44,6 @@ pub enum DataExtractionError {
 }
 
 #[derive(Debug, Fail, Copy, Clone)]
-#[fail(
-    display = "failed to extract interfaces belonging to link-netnsid {} from the output of 'ip link show'",
-    _0
-)]
+#[fail(display = "failed to extract interfaces belonging to link-netnsid {} from the output of 'ip link show'",
+       _0)]
 pub struct IntfMatchError(pub u32);

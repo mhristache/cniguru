@@ -6,12 +6,15 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
+extern crate serde_json;
+#[macro_use]
 extern crate failure;
 extern crate kubeclient;
 extern crate regex;
 extern crate url;
 #[macro_use]
 extern crate lazy_static;
+extern crate tabwriter;
 
 // modules
 mod error;
@@ -19,13 +22,14 @@ mod k8s;
 mod tests;
 
 use docopt::Docopt;
-use failure::{Error, ResultExt, Fail};
+use failure::{Error, Fail, ResultExt};
 use regex::Regex;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
-use std::io::Write;
+use tabwriter::TabWriter;
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
@@ -34,14 +38,15 @@ fn version() -> String {
 }
 
 const USAGE: &'static str = "
-Usage: cniguru pod <id> [-n <namespace>]
-       cniguru dc <id>
+Usage: cniguru pod <id> [-n <namespace>] [-o <output>]
+       cniguru dc ID [-o <output>]
        cniguru [-h] [--version]
 
 Options:
     -h, --help         Show this message.
     --version          Show the version
     -n                 Specify a kubernetes namespace
+    -o                 Specify a different way to format the output, e.g. json
 
 Main commands:
     pod                The name of a kubernetes pod
@@ -55,6 +60,12 @@ struct Args {
     arg_id: String,
     arg_namespace: Option<String>,
     flag_version: bool,
+    arg_output: Option<OutputFormat>,
+}
+
+#[derive(Debug, Deserialize)]
+enum OutputFormat {
+    JSON,
 }
 
 fn main() {
@@ -65,26 +76,28 @@ fn main() {
         .unwrap_or_else(|e| e.exit());
     debug!("program args: {:?}", args);
 
-    if let Err(e) = try_main(args) {
-        let mut fail: &Fail = e.cause();
-        let mut f = std::io::stderr();
-        write!(std::io::stderr(), "error: {}\n", fail).expect("could not write to stderr");
-        while let Some(cause) = fail.cause() {
-            write!(f, "caused by: {}\n", cause).expect("could not write to stderr");
-            fail = cause;
-        }
-        if std::env::var("RUST_BACKTRACE").is_ok() {
-            write!(f, "{}\n", e.backtrace()).expect("could not write to stderr");
-        }
-        std::process::exit(1);
+    if args.flag_version {
+        println!("{}", version());
+        return;
+    }
+
+    match try_main(&args) {
+        Ok(v) => match args.arg_output {
+            Some(OutputFormat::JSON) => println!(
+                "{}",
+                serde_json::to_string(&v).expect("failed to serialize the output to json")
+            ),
+            None => pretty_print_output_and_exit(v),
+        },
+        Err(e) => match args.arg_output {
+            Some(OutputFormat::JSON) => print_err_as_json_and_exit(e),
+            None => pretty_print_err_and_exit(e),
+        },
     }
 }
 
-fn try_main(args: Args) -> Result<(), Error> {
-    if args.flag_version {
-        println!("{}", version());
-        return Ok(());
-    }
+fn try_main(args: &Args) -> Result<Vec<Output>, Error> {
+    let mut output_vec = vec![];
 
     if args.cmd_pod {
         let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
@@ -94,24 +107,26 @@ fn try_main(args: Args) -> Result<(), Error> {
         );
         let containers = pod.containers().context(err_ctx)?;
         for container in containers {
-            gen_output_for_container(container)?;
+            let output = gen_output_for_container(container)?;
+            output_vec.push(output);
         }
     } else if args.cmd_dc {
         let container = Container {
-            id: args.arg_id,
+            id: args.arg_id.clone(),
             node_name: None,
             runtime: ContainerRuntime::Docker,
         };
-        gen_output_for_container(container)?;
+        let output = gen_output_for_container(container)?;
+        output_vec.push(output);
     } else {
         println!("Not enough arguments.\n{}", &USAGE);
         std::process::exit(1);
     }
-    Ok(())
+    Ok(output_vec)
 }
 
 // generate the output for the given container
-fn gen_output_for_container(container: Container) -> Result<(), Error> {
+fn gen_output_for_container(container: Container) -> Result<Output, Error> {
     let ctx1 = format!(
         "failed to find the namespace for container id {}",
         &container.id
@@ -120,9 +135,85 @@ fn gen_output_for_container(container: Container) -> Result<(), Error> {
         "failed to find the host interfaces for container id {}",
         &container.id
     );
-    let intfs = container.netns().context(ctx1)?.interfaces().context(ctx2)?;
-    println!("{:?}", intfs);
-    Ok(())
+    let interfaces = container.netns().context(ctx1)?.interfaces().context(ctx2)?;
+    Ok(Output {
+        container,
+        interfaces,
+    })
+}
+
+fn pretty_print_err_and_exit(e: Error) {
+    let mut fail: &Fail = e.cause();
+    let mut f = std::io::stderr();
+    write!(std::io::stderr(), "error: {}\n", fail).expect("could not write to stderr");
+    while let Some(cause) = fail.cause() {
+        write!(f, "caused by: {}\n", cause).expect("could not write to stderr");
+        fail = cause;
+    }
+    if std::env::var("RUST_BACKTRACE").is_ok() {
+        write!(f, "{}\n", e.backtrace()).expect("could not write to stderr");
+    }
+    std::process::exit(1);
+}
+
+fn print_err_as_json_and_exit(e: Error) {
+    let mut fail: &Fail = e.cause();
+    let mut caused_by = vec![];
+    while let Some(cause) = fail.cause() {
+        caused_by.push(cause.to_string());
+        fail = cause;
+    }
+
+    let err_str = json!({
+        "error": e.cause().to_string(),
+        "caused_by": caused_by
+    });
+
+    println!("{}", err_str);
+    std::process::exit(1);
+}
+
+fn pretty_print_output_and_exit(output: Vec<Output>) {
+    let mut r = vec![];
+
+    if output.len() > 0 {
+        let l = "CONTAINER_ID\tNODE\tINTERFACE\tMTU\tMAC_ADDRESS\tBRIDGE".to_string();
+        r.push(l);
+    }
+
+    for i in output {
+        for intf in i.interfaces {
+            let l = format!(
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                &i.container.id[0..12],
+                i.container.node_name.as_ref().map_or("-", |s| &s[..]),
+                &intf.name,
+                &intf.mtu,
+                &intf.mac_address,
+                intf.bridge.as_ref().map_or("-", |s| &s[..])
+            );
+            r.push(l);
+        }
+    }
+    let output_string = r.join("\n");
+    let tw = TabWriter::new(Vec::<u8>::new());
+    println!(
+        "\n{}\n",
+        tabify(tw, &output_string[..]).expect("failed to format the output")
+    );
+    std::process::exit(0);
+}
+
+pub fn tabify(mut tw: TabWriter<Vec<u8>>, s: &str) -> Result<String, Error> {
+    write!(&mut tw, "{}", s)?;
+    tw.flush()?;
+    Ok(String::from_utf8(tw.into_inner()?)?)
+}
+
+#[derive(Debug, Serialize)]
+struct Output {
+    container: Container,
+    interfaces: Vec<Intf>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -133,12 +224,12 @@ struct Intf {
     bridge: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum ContainerRuntime {
     Docker,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Container {
     pub id: String,
     pub node_name: Option<String>,
@@ -235,7 +326,8 @@ fn parse_ip_link_printout(printout: &str, id: u32) -> Result<Vec<Intf>, Error> {
         r".*\s+mtu\s+(?P<mtu>\d+)\s+",
         r"(?:.*\s+master\s+(?P<br>\w+)\s+)?",
         r".*\s+link/ether\s+(?P<mac>(\w|:)+)\s+",
-        r".*link-netnsid");
+        r".*link-netnsid"
+    );
     let s = format!("{} {}", s, id);
     let re = Regex::new(&s).unwrap();
     let err = error::IntfMatchError(id);
@@ -307,4 +399,3 @@ fn run_host_cmd(cmd: &str) -> Result<String, Error> {
         })?
     }
 }
-
