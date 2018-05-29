@@ -34,7 +34,7 @@ use tabwriter::TabWriter;
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
 fn version() -> String {
-    format!("yacht {} ({})", semver(), commit_date())
+    format!("cniguru {} ({})", semver(), commit_date())
 }
 
 const USAGE: &'static str = "
