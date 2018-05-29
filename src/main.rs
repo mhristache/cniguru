@@ -38,15 +38,15 @@ fn version() -> String {
 }
 
 const USAGE: &'static str = "
-Usage: cniguru pod <id> [-n <namespace>] [-o <output>]
-       cniguru dc ID [-o <output>]
+Usage: cniguru pod <id> [-n <namespace> ] [-o <output>]
+       cniguru dc <id> [-o <output> ]
        cniguru [-h] [--version]
 
 Options:
     -h, --help         Show this message.
     --version          Show the version
-    -n                 Specify a kubernetes namespace
-    -o                 Specify a different way to format the output, e.g. json
+    -n <namespace>     Specify a kubernetes namespace
+    -o <output>        Specify a different way to format the output, e.g. json
 
 Main commands:
     pod                The name of a kubernetes pod
@@ -58,9 +58,9 @@ struct Args {
     cmd_pod: bool,
     cmd_dc: bool,
     arg_id: String,
-    arg_namespace: Option<String>,
+    flag_n: Option<String>,
+    flag_o: Option<OutputFormat>,
     flag_version: bool,
-    arg_output: Option<OutputFormat>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,14 +82,14 @@ fn main() {
     }
 
     match try_main(&args) {
-        Ok(v) => match args.arg_output {
+        Ok(v) => match args.flag_o {
             Some(OutputFormat::JSON) => println!(
                 "{}",
                 serde_json::to_string(&v).expect("failed to serialize the output to json")
             ),
             None => pretty_print_output_and_exit(v),
         },
-        Err(e) => match args.arg_output {
+        Err(e) => match args.flag_o {
             Some(OutputFormat::JSON) => print_err_as_json_and_exit(e),
             None => pretty_print_err_and_exit(e),
         },
@@ -100,7 +100,7 @@ fn try_main(args: &Args) -> Result<Vec<Output>, Error> {
     let mut output_vec = vec![];
 
     if args.cmd_pod {
-        let pod = k8s::Pod::new(&args.arg_id, args.arg_namespace.as_ref().map(|x| &x[..]));
+        let pod = k8s::Pod::new(&args.arg_id, args.flag_n.as_ref().map(|x| &x[..]));
         let err_ctx = format!(
             "failed to get info about containers in pod '{}' on namespace '{}'",
             pod.name, pod.namespace
