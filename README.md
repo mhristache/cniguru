@@ -1,10 +1,20 @@
-CNIGuru
-========
+Overview
+--------
 
 `cniguru` is a tool that can be used to troubleshoot containers networking.
 It provides information about node interfaces used by docker and kubernetes containers:
 - the name, MAC address and MTU of the host interfaces used by containers
 - the bridge the interfaces are connected to
+
+License
+-------
+
+Licensed under either of
+
+* Apache License, Version 2.0, (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+* MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
+
+at your option.
 
 Examples
 --------

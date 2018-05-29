@@ -3,6 +3,16 @@ name = "cniguru"
 version = "0.1.0"
 authors = ["Maximilian Hristache <mhristache@gmail.com>"]
 build = "build.rs"
+description = """
+Troubleshooting tool for docker and kubernetes networking
+"""
+repository = "https://github.com/maximih/cniguru"
+homepage = "https://github.com/maximih/cniguru"
+documentation = "https://docs.rs/cniguru"
+readme = "README.md"
+keywords = ["cni", "docker", "kubernetes", "cloud-native"]
+categories = ["command-line-utilities"]
+license = "Apache 2.0/MIT"
 
 [build-dependencies]
 vergen = "0.1.0"

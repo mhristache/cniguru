@@ -96,6 +96,7 @@ fn main() {
     }
 }
 
+/// Wrapper on top of `main()` to be able to use `?` for error handling
 fn try_main(args: &Args) -> Result<Vec<Output>, Error> {
     let mut output_vec = vec![];
 
@@ -125,7 +126,7 @@ fn try_main(args: &Args) -> Result<Vec<Output>, Error> {
     Ok(output_vec)
 }
 
-// generate the output for the given container
+/// Generate the `Output` struct for the given container
 fn gen_output_for_container(container: Container) -> Result<Output, Error> {
     let ctx1 = format!(
         "failed to find the namespace for container id {}",
@@ -142,6 +143,7 @@ fn gen_output_for_container(container: Container) -> Result<Output, Error> {
     })
 }
 
+/// Pretty print the error and exit with code `1`
 fn pretty_print_err_and_exit(e: Error) {
     let mut fail: &Fail = e.cause();
     let mut f = std::io::stderr();
@@ -156,6 +158,7 @@ fn pretty_print_err_and_exit(e: Error) {
     std::process::exit(1);
 }
 
+/// Print the error in JSON format and exit with code `1`
 fn print_err_as_json_and_exit(e: Error) {
     let mut fail: &Fail = e.cause();
     let mut caused_by = vec![];
@@ -173,6 +176,7 @@ fn print_err_as_json_and_exit(e: Error) {
     std::process::exit(1);
 }
 
+/// Pretty print the output and exit with code `0`
 fn pretty_print_output_and_exit(output: Vec<Output>) {
     let mut r = vec![];
 
@@ -204,12 +208,14 @@ fn pretty_print_output_and_exit(output: Vec<Output>) {
     std::process::exit(0);
 }
 
+/// Align the tab separated values to make them look nice
 pub fn tabify(mut tw: TabWriter<Vec<u8>>, s: &str) -> Result<String, Error> {
     write!(&mut tw, "{}", s)?;
     tw.flush()?;
     Ok(String::from_utf8(tw.into_inner()?)?)
 }
 
+/// The output data structure
 #[derive(Debug, Serialize)]
 struct Output {
     container: Container,
@@ -237,6 +243,7 @@ pub struct Container {
 }
 
 impl Container {
+    /// Retrieve the `pid` for this container
     fn pid(&self) -> Result<u32, Error> {
         match self.runtime {
             ContainerRuntime::Docker => {
@@ -252,13 +259,14 @@ impl Container {
         }
     }
 
-    // get the linux netns for this container
+    /// Get the linux netns for this container
     fn netns(&self) -> Result<Netns, Error> {
         let pid = self.pid()?;
         Ok(Netns::new(pid))
     }
 }
 
+/// Struct used to work with linux namespaces
 struct Netns {
     pid: u32,
     rmdir_needed: bool,
@@ -278,6 +286,7 @@ impl Netns {
         }
     }
 
+    /// Get the list of interfaces connected to this linux network namespace
     fn interfaces(&mut self) -> Result<Vec<Intf>, Error> {
         // a link from /proc/<pid>/ns/net to /var/run/netns/<some id> must exist
         // so that `ip netns` commands can be used
@@ -318,6 +327,8 @@ impl Netns {
     }
 }
 
+/// Parse the output of `ip link show` and
+/// extract the interfaces belonging to link-netnsid with the given id
 fn parse_ip_link_printout(printout: &str, id: u32) -> Result<Vec<Intf>, Error> {
     debug!("parsing ip link printout to check for link-netnsid {}", &id);
     let mut res = vec![];
