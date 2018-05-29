@@ -77,7 +77,7 @@ cargo build --release
 
 ### Download `x86_64` binary
 
-A statically linked binary for linux `x86_64` is provided [here](https://github.com/maximih/cniguru/releases/tag/0.1.0)
+A statically linked binary for linux `x86_64` is provided [here](https://github.com/maximih/cniguru/releases/download/0.1.0/cniguru_x86_64_0.1.0.tar.gz)
 
 Configuration
 -------------
