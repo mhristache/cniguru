@@ -12,7 +12,7 @@ documentation = "https://docs.rs/cniguru"
 readme = "README.md"
 keywords = ["cni", "docker", "kubernetes", "cloud-native"]
 categories = ["command-line-utilities"]
-license = "Apache 2.0/MIT"
+license = "Apache-2.0/MIT"
 
 [build-dependencies]
 vergen = "0.1.0"
