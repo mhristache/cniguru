@@ -335,7 +335,7 @@ fn parse_ip_link_printout(printout: &str, id: u32) -> Result<Vec<Intf>, Error> {
     let s = concat!(
         r"\d+:\s+(?P<name>\w+)@\w+:",
         r".*\s+mtu\s+(?P<mtu>\d+)\s+",
-        r"(?:.*\s+master\s+(?P<br>\w+)\s+)?",
+        r"(?:.*\s+master\s+(?P<br>\S+)\s+)?",
         r".*\s+link/ether\s+(?P<mac>(\w|:)+)\s+",
         r".*link-netnsid"
     );

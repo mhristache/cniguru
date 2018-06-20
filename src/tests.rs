@@ -1,5 +1,5 @@
 #[test]
-fn test_parse_ip_link_printout() {
+fn test_parse_ip_link_printout_basic() {
     use super::{parse_ip_link_printout, Intf};
 
     let s = r#"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
@@ -31,6 +31,27 @@ fn test_parse_ip_link_printout() {
     ];
 
     let got = parse_ip_link_printout(s, 1).unwrap();
+
+    assert_eq!(exp, got);
+}
+
+#[test]
+fn test_parse_ip_link_printout_multus() {
+    use super::{parse_ip_link_printout, Intf};
+
+    let s = r#"610: veth987c7292@if5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master bla-bla-int0 state UP mode DEFAULT group default
+    link/ether 46:ed:60:c6:e9:73 brd ff:ff:ff:ff:ff:ff link-netnsid 6"#;
+
+    let exp = vec![
+        Intf {
+            name: "veth987c7292".into(),
+            bridge: Some("bla-bla-int0".into()),
+            mtu: 1500,
+            mac_address: "46:ed:60:c6:e9:73".into(),
+        },
+    ];
+
+    let got = parse_ip_link_printout(s, 6).unwrap();
 
     assert_eq!(exp, got);
 }
