@@ -27,6 +27,7 @@ fn test_parse_ip_link_printout_basic() {
             bridge: Some("cni0".into()),
             mtu: 1450,
             mac_address: "12:56:7d:9f:80:15".into(),
+            ip_address: None,
         },
     ];
 
@@ -48,10 +49,73 @@ fn test_parse_ip_link_printout_multus() {
             bridge: Some("bla-bla-int0".into()),
             mtu: 1500,
             mac_address: "46:ed:60:c6:e9:73".into(),
+            ip_address: None
         },
     ];
 
     let got = parse_ip_link_printout(s, 6).unwrap();
+
+    assert_eq!(exp, got);
+}
+
+
+#[test]
+fn test_parse_ip_addr_printout_multus() {
+    use super::{parse_ip_addr_printout, Intf};
+
+    let s = r#"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+3: eth0@if545: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1460 qdisc noqueue state UP group default
+    link/ether 0a:58:0a:f4:00:d8 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.244.0.216/24 scope global eth0
+       valid_lft forever preferred_lft forever
+5: net0@if546: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 0a:58:15:17:5f:01 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 21.23.95.1/25 scope global net0
+       valid_lft forever preferred_lft forever
+7: net1@if547: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 0a:58:15:17:60:01 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 21.23.96.1/25 scope global net1
+       valid_lft forever preferred_lft forever
+9: net2@if548: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 0a:58:15:17:61:01 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 21.23.97.1/25 scope global net2
+       valid_lft forever preferred_lft forever"#;
+
+    let exp = vec![
+        Intf {
+            name: "eth0".into(),
+            bridge: None,
+            mtu: 1460,
+            mac_address: "0a:58:0a:f4:00:d8".into(),
+            ip_address: Some("10.244.0.216/24".into()),
+        },
+        Intf {
+            name: "net0".into(),
+            bridge: None,
+            mtu: 1500,
+            mac_address: "0a:58:15:17:5f:01".into(),
+            ip_address: Some("21.23.95.1/25".into()),
+        },
+        Intf {
+            name: "net1".into(),
+            bridge: None,
+            mtu: 1500,
+            mac_address: "0a:58:15:17:60:01".into(),
+            ip_address: Some("21.23.96.1/25".into()),
+        },
+        Intf {
+            name: "net2".into(),
+            bridge: None,
+            mtu: 1500,
+            mac_address: "0a:58:15:17:61:01".into(),
+            ip_address: Some("21.23.97.1/25".into()),
+        },
+    ];
+
+    let got = parse_ip_addr_printout(s).unwrap();
 
     assert_eq!(exp, got);
 }

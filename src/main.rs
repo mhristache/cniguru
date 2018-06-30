@@ -228,6 +228,7 @@ struct Intf {
     mtu: u16,
     mac_address: String,
     bridge: Option<String>,
+    ip_address: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -288,6 +289,18 @@ impl Netns {
 
     /// Get the list of interfaces connected to this linux network namespace
     fn interfaces(&mut self) -> Result<Vec<Intf>, Error> {
+
+        // Fetch the output of ip link show before creating the netns related links
+        // to avoid a hard to troubleshoot bug where the netns id has a strange value if
+        // ip link show is executed after the links are created.
+        // For example, it can look like this:
+        //    link/ether 7a:86:33:d4:33:bf brd ff:ff:ff:ff:ff:ff link-netns ns-23256
+        // instead of like this:
+        //    link/ether 7a:86:33:d4:33:bf brd ff:ff:ff:ff:ff:ff link-netnsid 1
+        debug!("fetching ip link printout");
+        let cmd = "ip link show";
+        let ip_link_output = run_host_cmd(cmd)?;
+
         // a link from /proc/<pid>/ns/net to /var/run/netns/<some id> must exist
         // so that `ip netns` commands can be used
         let parent_dir = self.dst_path.parent().unwrap();
@@ -319,11 +332,7 @@ impl Netns {
             None => return Err(error::DataExtractionError::OutputParsingError(cmd))?,
         };
 
-        debug!("fetching ip link printout");
-        let cmd = "ip link show";
-        let output = run_host_cmd(cmd)?;
-
-        parse_ip_link_printout(&output, id)
+        parse_ip_link_printout(&ip_link_output, id)
     }
 }
 
@@ -341,13 +350,43 @@ fn parse_ip_link_printout(printout: &str, id: u32) -> Result<Vec<Intf>, Error> {
     );
     let s = format!("{} {}", s, id);
     let re = Regex::new(&s).unwrap();
-    let err = error::IntfMatchError(id);
+    let err = error::NetnsIntfMatchError(id);
     for m in re.captures_iter(printout) {
         let intf = Intf {
             name: m.name("name").ok_or(err)?.as_str().to_string(),
             mtu: m.name("mtu").ok_or(err)?.as_str().parse()?,
             bridge: m.name("br").map(|v| v.as_str().to_string()),
             mac_address: m.name("mac").ok_or(err)?.as_str().to_string(),
+            ip_address: None // We don't care about the IP address here
+        };
+        res.push(intf);
+    }
+    if res.len() == 0 {
+        Err(err)?
+    } else {
+        Ok(res)
+    }
+}
+
+/// Parse the output of `ip addr show` and extract the linknet interfaces
+fn parse_ip_addr_printout(printout: &str) -> Result<Vec<Intf>, Error> {
+    debug!("parsing ip addr printout");
+    let mut res = vec![];
+    let s = concat!(
+        r"\d+:\s+(?P<name>\w+)@\w+:",
+        r".*\s+mtu\s+(?P<mtu>\d+)\s+",
+        r".*\s+link/ether\s+(?P<mac>(\w|:)+)\s+",
+        r"(.*\s+inet\s+(?P<ipv4>\S+)\s+)?"
+    );
+    let re = Regex::new(&s).unwrap();
+    let err = error::IpAddrShowParseErr;
+    for m in re.captures_iter(printout) {
+        let intf = Intf {
+            name: m.name("name").ok_or(err)?.as_str().to_string(),
+            mtu: m.name("mtu").ok_or(err)?.as_str().parse()?,
+            bridge: None,
+            mac_address: m.name("mac").ok_or(err)?.as_str().to_string(),
+            ip_address: m.name("ipv4").map(|m| m.as_str().to_string()),
         };
         res.push(intf);
     }

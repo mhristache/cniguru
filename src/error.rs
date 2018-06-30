@@ -46,4 +46,9 @@ pub enum DataExtractionError {
 #[derive(Debug, Fail, Copy, Clone)]
 #[fail(display = "failed to extract interfaces belonging to link-netnsid {} from the output of 'ip link show'",
        _0)]
-pub struct IntfMatchError(pub u32);
+pub struct NetnsIntfMatchError(pub u32);
+
+
+#[derive(Debug, Fail, Copy, Clone)]
+#[fail(display = "failed to extract linknet interfaces from the output of 'ip addr show'")]
+pub struct IpAddrShowParseErr;
