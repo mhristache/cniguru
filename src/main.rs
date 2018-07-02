@@ -19,15 +19,13 @@ extern crate tabwriter;
 // modules
 mod error;
 mod k8s;
+#[cfg(test)]
 mod tests;
 
 use docopt::Docopt;
 use failure::{Error, Fail, ResultExt};
 use regex::Regex;
-use std::fs;
 use std::io::Write;
-use std::os::unix::fs::symlink;
-use std::path::PathBuf;
 use std::process::Command;
 use tabwriter::TabWriter;
 
@@ -112,11 +110,7 @@ fn try_main(args: &Args) -> Result<Vec<Output>, Error> {
             output_vec.push(output);
         }
     } else if args.cmd_dc {
-        let container = Container {
-            id: args.arg_id.clone(),
-            node_name: None,
-            runtime: ContainerRuntime::Docker,
-        };
+        let container = Container::new(args.arg_id.clone(), ContainerRuntime::Docker)?;
         let output = gen_output_for_container(container)?;
         output_vec.push(output);
     } else {
@@ -128,15 +122,11 @@ fn try_main(args: &Args) -> Result<Vec<Output>, Error> {
 
 /// Generate the `Output` struct for the given container
 fn gen_output_for_container(container: Container) -> Result<Output, Error> {
-    let ctx1 = format!(
-        "failed to find the namespace for container id {}",
+    let ctx = format!(
+        "failed to generate the output interface pairs for container id {}",
         &container.id
     );
-    let ctx2 = format!(
-        "failed to find the host interfaces for container id {}",
-        &container.id
-    );
-    let interfaces = container.netns().context(ctx1)?.interfaces().context(ctx2)?;
+    let interfaces = container.interfaces().context(ctx)?;
     Ok(Output {
         container,
         interfaces,
@@ -191,10 +181,10 @@ fn pretty_print_output_and_exit(output: Vec<Output>) {
                 "{}\t{}\t{}\t{}\t{}\t{}",
                 &i.container.id[0..12],
                 i.container.node_name.as_ref().map_or("-", |s| &s[..]),
-                &intf.name,
-                &intf.mtu,
-                &intf.mac_address,
-                intf.bridge.as_ref().map_or("-", |s| &s[..])
+                &intf.node.name,
+                &intf.node.mtu,
+                &intf.node.mac_address,
+                intf.node.bridge.as_ref().map_or("-", |s| &s[..])
             );
             r.push(l);
         }
@@ -219,16 +209,25 @@ pub fn tabify(mut tw: TabWriter<Vec<u8>>, s: &str) -> Result<String, Error> {
 #[derive(Debug, Serialize)]
 struct Output {
     container: Container,
-    interfaces: Vec<Intf>,
+    interfaces: Vec<VethIntfPair>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
-struct Intf {
+struct VethIntf {
     name: String,
+    ifindex: u16,
+    peer_ifindex: u16,
     mtu: u16,
     mac_address: String,
     bridge: Option<String>,
     ip_address: Option<String>,
+}
+
+// a pair of container/node interfaces, e.g. a veth pair
+#[derive(Debug, Serialize)]
+struct VethIntfPair {
+    container: VethIntf,
+    node: VethIntf,
 }
 
 #[derive(Debug, Serialize)]
@@ -239,152 +238,107 @@ pub enum ContainerRuntime {
 #[derive(Debug, Serialize)]
 pub struct Container {
     pub id: String,
+    pub pid: u32,
     pub node_name: Option<String>,
     pub runtime: ContainerRuntime,
 }
 
 impl Container {
-    /// Retrieve the `pid` for this container
-    fn pid(&self) -> Result<u32, Error> {
-        match self.runtime {
+    fn new(id: String, runtime: ContainerRuntime) -> Result<Self, Error> {
+        // Retrieve the `pid` of the container
+        let pid = match runtime {
             ContainerRuntime::Docker => {
                 // fetch the PID using docker CLI
                 // a docker client is not currently used as it's hard to find a lightweight
                 // and good enough one in the rust ecosystem
-                debug!("trying to find the pid for docker container {}", &self.id);
-                let cmd = format!("docker inspect {} --format '{{{{.State.Pid}}}}'", &self.id);
+                debug!("trying to find the pid for docker container {}", &id);
+                let cmd = format!("docker inspect {} --format '{{{{.State.Pid}}}}'", &id);
                 let output = run_host_cmd(&cmd)?;
                 let pid: u32 = output.trim_matches('\'').parse()?;
-                Ok(pid)
+                pid
             }
-        }
-    }
-
-    /// Get the linux netns for this container
-    fn netns(&self) -> Result<Netns, Error> {
-        let pid = self.pid()?;
-        Ok(Netns::new(pid))
-    }
-}
-
-/// Struct used to work with linux namespaces
-struct Netns {
-    pid: u32,
-    rmdir_needed: bool,
-    rmlink_needed: bool,
-    dst_path: PathBuf,
-    src_path: PathBuf,
-}
-
-impl Netns {
-    fn new(pid: u32) -> Self {
-        Self {
-            pid: pid,
-            rmdir_needed: false,
-            rmlink_needed: false,
-            dst_path: PathBuf::from(format!("/var/run/netns/ns-{}", pid)),
-            src_path: PathBuf::from(format!("/proc/{}/ns/net", pid)),
-        }
-    }
-
-    /// Get the list of interfaces connected to this linux network namespace
-    fn interfaces(&mut self) -> Result<Vec<Intf>, Error> {
-
-        // Fetch the output of ip link show before creating the netns related links
-        // to avoid a hard to troubleshoot bug where the netns id has a strange value if
-        // ip link show is executed after the links are created.
-        // For example, it can look like this:
-        //    link/ether 7a:86:33:d4:33:bf brd ff:ff:ff:ff:ff:ff link-netns ns-23256
-        // instead of like this:
-        //    link/ether 7a:86:33:d4:33:bf brd ff:ff:ff:ff:ff:ff link-netnsid 1
-        debug!("fetching ip link printout");
-        let cmd = "ip link show";
-        let ip_link_output = run_host_cmd(cmd)?;
-
-        // a link from /proc/<pid>/ns/net to /var/run/netns/<some id> must exist
-        // so that `ip netns` commands can be used
-        let parent_dir = self.dst_path.parent().unwrap();
-        if !parent_dir.exists() {
-            fs::create_dir_all(parent_dir)?;
-            self.rmdir_needed = true;
-        }
-
-        if !self.dst_path.exists() {
-            symlink(self.src_path.as_path(), self.dst_path.as_path())?;
-            self.rmlink_needed = true;
-        }
-
-        debug!("trying to find the namespace id for pid {}", self.pid);
-        let cmd = format!("ip netns identify {}", self.pid);
-        let output = run_host_cmd(&cmd)?;
-
-        debug!("trying to find link-netnsid for ns {}", &output);
-        let cmd = format!("ip netns list | grep {}", &output);
-        let output = run_host_cmd(&cmd)?;
-
-        // the expected format of the output is something like `ns-56316 (id: 6)`
-        debug!("extracting the link-netnsid from {}", &output);
-        lazy_static! {
-            static ref RE1: Regex = Regex::new(r"\(id: (\d+)\)").unwrap();
-        }
-        let id: u32 = match RE1.captures(&output).and_then(|m| m.get(1)) {
-            Some(v) => v.as_str().parse()?,
-            None => return Err(error::DataExtractionError::OutputParsingError(cmd))?,
         };
 
-        parse_ip_link_printout(&ip_link_output, id)
+        let container = Self {
+            id,
+            pid,
+            runtime,
+            node_name: None,
+        };
+        debug!("new Container: {:?}", &container);
+        Ok(container)
+    }
+
+    /// Get the list of container interfaces
+    fn get_container_interfaces(&self) -> Result<Vec<VethIntf>, Error> {
+        debug!(
+            "fetching `ip addr show` printout for container {}",
+            &self.id
+        );
+        let cmd = format!("nsenter -t {} -n -- ip addr show", &self.pid);
+        let output = run_host_cmd(&cmd)?;
+
+        parse_ip_link_or_addr_printout(&output)
+    }
+
+    /// create a list of interface pairs,
+    /// i.e. the container interfaces and their corresponding node interface
+    fn interfaces(&self) -> Result<Vec<VethIntfPair>, Error> {
+        // fetch the node interfaces
+        debug!("fetching node `ip link show` printout");
+        let cmd = "ip link show";
+        let output = run_host_cmd(cmd)?;
+
+        let mut node_intfs = parse_ip_link_or_addr_printout(&output)?;
+
+        let container_intfs = self.get_container_interfaces()?;
+
+        let mut out = vec![];
+
+        // group the container interface and the corresponding node interface
+
+        // Rust does not allow to take out elements of a vec while iterating through it
+        // so find the index of the node interface for every container interface
+        // and use the index to extract the needed element
+        for cintf in container_intfs {
+            let err = error::IntfMissingErr(cintf.peer_ifindex);
+            let pos = node_intfs
+                .iter()
+                .position(|nintf| cintf.peer_ifindex == nintf.ifindex)
+                .ok_or(err)?;
+            let nintf = node_intfs.swap_remove(pos);
+            out.push(VethIntfPair {
+                container: cintf,
+                node: nintf,
+            });
+        }
+        Ok(out)
     }
 }
 
-/// Parse the output of `ip link show` and
-/// extract the interfaces belonging to link-netnsid with the given id
-fn parse_ip_link_printout(printout: &str, id: u32) -> Result<Vec<Intf>, Error> {
-    debug!("parsing ip link printout to check for link-netnsid {}", &id);
+/// Parse the output of `ip link show` or `ip addr show` and extract the interfaces
+fn parse_ip_link_or_addr_printout(printout: &str) -> Result<Vec<VethIntf>, Error> {
+    debug!("parsing ip link/addr printout");
     let mut res = vec![];
-    let s = concat!(
-        r"\d+:\s+(?P<name>\w+)@\w+:",
-        r".*\s+mtu\s+(?P<mtu>\d+)\s+",
-        r"(?:.*\s+master\s+(?P<br>\S+)\s+)?",
-        r".*\s+link/ether\s+(?P<mac>(\w|:)+)\s+",
-        r".*link-netnsid"
-    );
-    let s = format!("{} {}", s, id);
-    let re = Regex::new(&s).unwrap();
-    let err = error::NetnsIntfMatchError(id);
-    for m in re.captures_iter(printout) {
-        let intf = Intf {
+
+    lazy_static! {
+        static ref S: &'static str = concat!(
+            r"(?P<index>\d+):\s+(?P<name>\w+)@if(?P<pindex>\d+):",
+            r".*\s+mtu\s+(?P<mtu>\d+)\s+",
+            r"(?:.*\s+master\s+(?P<br>\S+)\s+)?",
+            r".*\s+link/ether\s+(?P<mac>(\S)+)\s+",
+            r"(.*\s+inet\s+(?P<ipv4>\S+)\s+)?",
+        );
+        static ref RE: Regex = Regex::new(&S).unwrap();
+    }
+    let err = error::IpLinkOrAddrShowParseErr;
+    for m in RE.captures_iter(printout) {
+        let intf = VethIntf {
             name: m.name("name").ok_or(err)?.as_str().to_string(),
+            ifindex: m.name("index").ok_or(err)?.as_str().parse()?,
+            peer_ifindex: m.name("pindex").ok_or(err)?.as_str().parse()?,
             mtu: m.name("mtu").ok_or(err)?.as_str().parse()?,
             bridge: m.name("br").map(|v| v.as_str().to_string()),
-            mac_address: m.name("mac").ok_or(err)?.as_str().to_string(),
-            ip_address: None // We don't care about the IP address here
-        };
-        res.push(intf);
-    }
-    if res.len() == 0 {
-        Err(err)?
-    } else {
-        Ok(res)
-    }
-}
-
-/// Parse the output of `ip addr show` and extract the linknet interfaces
-fn parse_ip_addr_printout(printout: &str) -> Result<Vec<Intf>, Error> {
-    debug!("parsing ip addr printout");
-    let mut res = vec![];
-    let s = concat!(
-        r"\d+:\s+(?P<name>\w+)@\w+:",
-        r".*\s+mtu\s+(?P<mtu>\d+)\s+",
-        r".*\s+link/ether\s+(?P<mac>(\w|:)+)\s+",
-        r"(.*\s+inet\s+(?P<ipv4>\S+)\s+)?"
-    );
-    let re = Regex::new(&s).unwrap();
-    let err = error::IpAddrShowParseErr;
-    for m in re.captures_iter(printout) {
-        let intf = Intf {
-            name: m.name("name").ok_or(err)?.as_str().to_string(),
-            mtu: m.name("mtu").ok_or(err)?.as_str().parse()?,
-            bridge: None,
             mac_address: m.name("mac").ok_or(err)?.as_str().to_string(),
             ip_address: m.name("ipv4").map(|m| m.as_str().to_string()),
         };
@@ -394,25 +348,6 @@ fn parse_ip_addr_printout(printout: &str) -> Result<Vec<Intf>, Error> {
         Err(err)?
     } else {
         Ok(res)
-    }
-}
-
-impl Drop for Netns {
-    /// Drop is used to remove files created by self.interfaces() logic
-    fn drop(&mut self) {
-        if self.rmlink_needed {
-            match fs::remove_file(self.dst_path.as_path()) {
-                Ok(_) => debug!("symlink removed successfully"),
-                Err(e) => debug!("failed to remove the symlink: {}", e),
-            }
-        }
-        if self.rmdir_needed {
-            let parent_dir = self.dst_path.parent().unwrap();
-            match fs::remove_dir(parent_dir) {
-                Ok(_) => debug!("parent dir removed successfully"),
-                Err(e) => debug!("failed to remove the parent dir: {}", e),
-            }
-        }
     }
 }
 

@@ -118,12 +118,9 @@ fn extract_container_info(pod: kubeclient::resources::Pod) -> Result<Vec<Contain
                                 }
                                 None => Err(K8sError::MissingOrNullField(obj_path))?,
                             };
-                        let entry = Container {
-                            id: container_id,
-                            node_name: pod.spec.node_name.clone(),
-                            runtime: runtime,
-                        };
-                        res.push(entry);
+                        let mut container = Container::new(container_id, runtime)?;
+                        container.node_name = pod.spec.node_name.clone();
+                        res.push(container);
                     }
                 }
                 None => Err(K8sError::MissingOrNullField(

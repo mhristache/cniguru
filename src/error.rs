@@ -5,7 +5,9 @@ pub enum K8sError {
     #[fail(display = "{}", _0)]
     KubeclientError(String),
 
-    #[fail(display = "kubernetes config not specified using $KUBECONFIG env var and could not open either $HOME/.kube/config or /etc/kubernetes/admin.conf")]
+    #[fail(
+        display = "kubernetes config not specified using $KUBECONFIG env var and could not open either $HOME/.kube/config or /etc/kubernetes/admin.conf"
+    )]
     KubeconfigMissing,
 
     #[fail(display = "container has an unsupported runtime: {}", _0)]
@@ -37,18 +39,10 @@ pub enum HostCmdError {
     CmdInvalid(String),
 }
 
-#[derive(Debug, Fail)]
-pub enum DataExtractionError {
-    #[fail(display = "failed to parse the output of '{}'", _0)]
-    OutputParsingError(String),
-}
+#[derive(Debug, Fail, Copy, Clone)]
+#[fail(display = "failed to extract veth interfaces from the output of `ip link/addr show`")]
+pub struct IpLinkOrAddrShowParseErr;
 
 #[derive(Debug, Fail, Copy, Clone)]
-#[fail(display = "failed to extract interfaces belonging to link-netnsid {} from the output of 'ip link show'",
-       _0)]
-pub struct NetnsIntfMatchError(pub u32);
-
-
-#[derive(Debug, Fail, Copy, Clone)]
-#[fail(display = "failed to extract linknet interfaces from the output of 'ip addr show'")]
-pub struct IpAddrShowParseErr;
+#[fail(display = "failed to find a node veth interface with ifindex {}", _0)]
+pub struct IntfMissingErr(pub u16);

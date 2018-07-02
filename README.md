@@ -37,8 +37,8 @@ CONTAINER_ID  NODE  INTERFACE     MTU   MAC_ADDRESS        BRIDGE
 * Present the output in JSON format:
 
 ```bash
-[root@kh1 ~]# ./cniguru pod serve-hostname-86bc9d96dc-8cb49 -o json
-[{"container":{"id":"4eab7e156c75d46bfcc925f9a01e6cdb238a351b4952f5e20074e2cad0d08b65","node_name":"kh1","runtime":"Docker"},"interfaces":[{"name":"veth0cac8bed","mtu":1500,"mac_address":"42:56:c3:1e:7e:35","bridge":"cni0"}]}]
+$ sudo cniguru pod serve-hostname-86bc9d96dc-9b8xn -o json
+[{"container":{"id":"994ae42819bb8f7311f4e0d89cd83a5499ed02008b34091010e73329f1707a0b","pid":23256,"node_name":"sentinel","runtime":"Docker"},"interfaces":[{"container":{"name":"eth0","ifindex":3,"peer_ifindex":14,"mtu":1500,"mac_address":"3e:f0:1f:0f:27:ae","bridge":null,"ip_address":"10.244.0.5/24"},"node":{"name":"veth20ac475f","ifindex":14,"peer_ifindex":3,"mtu":1500,"mac_address":"7a:86:33:d4:33:bf","bridge":"cni0","ip_address":null}}]}]
 ```
 
 Installation
