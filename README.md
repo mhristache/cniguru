@@ -3,8 +3,9 @@ Overview
 
 `cniguru` is a tool that can be used to troubleshoot containers networking.
 It provides information about node interfaces used by docker and kubernetes containers:
-- the name, MAC address and MTU of the host interfaces used by containers
-- the bridge the interfaces are connected to
+- the name, IP, MAC address and MTU of the interfaces used by containers
+- details about the veth pair (the host/node side of a container interface)
+- the host/node bridge the interfaces are connected to
 
 License
 -------
