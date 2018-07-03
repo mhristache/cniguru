@@ -24,21 +24,73 @@ Examples
 ```bash
 [root@kh1 ~]# KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pod
 NAME                              READY     STATUS    RESTARTS   AGE
-netshoot-6d994df756-v9rgf         1/1       Running   0          2m
-serve-hostname-86bc9d96dc-8cb49   1/1       Running   0          2m
+netshoot-57c7994b66-zxdsl         1/1       Running   0          2m
+serve-hostname-86bc9d96dc-n7n6h   1/1       Running   0          7d
 [root@kh1 ~]# 
-[root@kh1 ~]# ./cniguru pod netshoot-6d994df756-v9rgf
+[root@kh1 ~]# cniguru pod netshoot-57c7994b66-zxdsl 
 
-CONTAINER_ID  NODE  INTERFACE     MTU   MAC_ADDRESS        BRIDGE
-7180b102b955  kh1   vethe8c8302a  1460  a6:eb:27:39:dd:dd  cni0
-7180b102b955  kh1   veth593daf68  1500  e2:31:16:b3:66:40  br_dc_test
+CONTAINER_ID  PID    NODE  INTF(C)  MAC_ADDRESS(C)     IP_ADDRESS(C)    INTF(N)       BRIDGE(N)
+3e08cafbb6eb  26393  kh1   eth0     0a:58:0a:f4:00:de  10.244.0.222/24  veth0c97cb60  cni0
+3e08cafbb6eb  26393  kh1   net0     0a:58:0a:08:08:06  10.8.8.6/24      veth74689fd2  br_dc_test
+
 ```
 
 * Present the output in JSON format:
 
 ```bash
-$ sudo cniguru pod serve-hostname-86bc9d96dc-9b8xn -o json
-[{"container":{"id":"994ae42819bb8f7311f4e0d89cd83a5499ed02008b34091010e73329f1707a0b","pid":23256,"node_name":"sentinel","runtime":"Docker"},"interfaces":[{"container":{"name":"eth0","ifindex":3,"peer_ifindex":14,"mtu":1500,"mac_address":"3e:f0:1f:0f:27:ae","bridge":null,"ip_address":"10.244.0.5/24"},"node":{"name":"veth20ac475f","ifindex":14,"peer_ifindex":3,"mtu":1500,"mac_address":"7a:86:33:d4:33:bf","bridge":"cni0","ip_address":null}}]}]
+[root@kh1 ~]# cniguru pod netshoot-57c7994b66-zxdsl -o json
+[
+  {
+    "container": {
+      "id": "3e08cafbb6eb01558e86ba53f170b62855f0bf5a328a77dc2da278061ff7fdc8",
+      "pid": 26393,
+      "node_name": "kh1",
+      "runtime": "Docker"
+    },
+    "interfaces": [
+      {
+        "container": {
+          "name": "eth0",
+          "ifindex": 3,
+          "peer_ifindex": 558,
+          "mtu": 1460,
+          "mac_address": "0a:58:0a:f4:00:de",
+          "bridge": null,
+          "ip_address": "10.244.0.222/24"
+        },
+        "node": {
+          "name": "veth0c97cb60",
+          "ifindex": 558,
+          "peer_ifindex": 3,
+          "mtu": 1460,
+          "mac_address": "0a:20:94:a0:35:64",
+          "bridge": "cni0",
+          "ip_address": null
+        }
+      },
+      {
+        "container": {
+          "name": "net0",
+          "ifindex": 5,
+          "peer_ifindex": 559,
+          "mtu": 1500,
+          "mac_address": "0a:58:0a:08:08:06",
+          "bridge": null,
+          "ip_address": "10.8.8.6/24"
+        },
+        "node": {
+          "name": "veth74689fd2",
+          "ifindex": 559,
+          "peer_ifindex": 5,
+          "mtu": 1500,
+          "mac_address": "d2:ae:0b:9f:62:72",
+          "bridge": "br_dc_test",
+          "ip_address": null
+        }
+      }
+    ]
+  }
+]
 ```
 
 Installation
@@ -77,7 +129,7 @@ cargo build --release
 
 ### Download `x86_64` binary
 
-A statically linked binary for linux `x86_64` is provided [here](https://github.com/maximih/cniguru/releases/download/0.1.0/cniguru_x86_64_0.1.0.tar.gz)
+A statically linked binary for linux `x86_64` is provided [here](https://github.com/maximih/cniguru/releases/download/0.2.0/cniguru_x86_64_0.2.0.tar.gz)
 
 Configuration
 -------------

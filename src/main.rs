@@ -83,7 +83,7 @@ fn main() {
         Ok(v) => match args.flag_o {
             Some(OutputFormat::JSON) => println!(
                 "{}",
-                serde_json::to_string(&v).expect("failed to serialize the output to json")
+                serde_json::to_string_pretty(&v).expect("failed to serialize the output to json")
             ),
             None => pretty_print_output_and_exit(v),
         },
@@ -171,24 +171,30 @@ fn pretty_print_output_and_exit(output: Vec<Output>) {
     let mut r = vec![];
 
     if output.len() > 0 {
-        let l = "CONTAINER_ID\tNODE\tINTERFACE\tMTU\tMAC_ADDRESS\tBRIDGE".to_string();
+        let l =
+            "CONTAINER_ID\tPID\tNODE\tINTF(C)\tMAC_ADDRESS(C)\tIP_ADDRESS(C)\tINTF(N)\tBRIDGE(N)"
+                .to_string();
         r.push(l);
     }
 
     for i in output {
+        let short_id = &i.container.id[0..12];
         for intf in i.interfaces {
             let l = format!(
-                "{}\t{}\t{}\t{}\t{}\t{}",
-                &i.container.id[0..12],
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                short_id,
+                i.container.pid,
                 i.container.node_name.as_ref().map_or("-", |s| &s[..]),
+                &intf.container.name,
+                &intf.container.mac_address,
+                &intf.container.ip_address.as_ref().map_or("-", |s| &s[..]),
                 &intf.node.name,
-                &intf.node.mtu,
-                &intf.node.mac_address,
                 intf.node.bridge.as_ref().map_or("-", |s| &s[..])
             );
             r.push(l);
         }
     }
+
     let output_string = r.join("\n");
     let tw = TabWriter::new(Vec::<u8>::new());
     println!(
