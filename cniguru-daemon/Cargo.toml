@@ -1,0 +1,34 @@
+[package]
+name = "cniguru-daemon"
+version = "0.1.0"
+authors = ["Maximilian Hristache <mhristache@gmail.com>"]
+license = "Apache-2.0/MIT"
+
+[[bin]]
+name = "cniguru-proxy"
+path = "src/proxy.rs"
+
+[[bin]]
+name = "cniguru-agent"
+path = "src/agent.rs"
+
+
+[dependencies]
+futures = "0.1"
+bytes = "0.4"
+env_logger = { version = "0.5", default-features = false }
+log = "0.4"
+http = "0.1"
+prost = "0.4"
+prost-derive = "0.4"
+tokio-core = "0.1"
+tower-h2 = { git = "https://github.com/tower-rs/tower-h2" }
+tower-http = { git = "https://github.com/tower-rs/tower-http" }
+tower-grpc = { git = "https://github.com/tower-rs/tower-grpc" }
+tower-service = { git = "https://github.com/tower-rs/tower" }
+failure = "0.1"
+regex = "1.0"
+lazy_static = "1.0"
+
+[build-dependencies]
+tower-grpc-build = { git = "https://github.com/tower-rs/tower-grpc/" }
