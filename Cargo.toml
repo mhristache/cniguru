@@ -17,20 +17,43 @@ license = "Apache-2.0/MIT"
 [build-dependencies]
 vergen = "0.1.0"
 
-[workspace]
-members = ["cniguru-daemon"]
 
+[[bin]]
+name = "cniguru-proxy"
+path = "src/proxy.rs"
+
+[[bin]]
+name = "cniguru-agent"
+path = "src/agent.rs"
+
+[[bin]]
+name = "cniguru"
+path = "src/client.rs"
+
+[build-dependencies]
+tower-grpc-build = { git = "https://github.com/tower-rs/tower-grpc/" }
 
 [dependencies]
 docopt = "1.0"
 log = "0.4"
-env_logger = "0.5"
+env_logger = { version = "0.5", default-features = false }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 failure = "0.1"
 kubeclient = "0.1"
 url = "1.7"
-regex = "1.0"
 lazy_static = "1.0"
 tabwriter = "1.0"
+futures = "0.1"
+bytes = "0.4"
+http = "0.1"
+prost = "0.4"
+prost-derive = "0.4"
+tokio-core = "0.1"
+tower-h2 = { git = "https://github.com/tower-rs/tower-h2" }
+tower-http = { git = "https://github.com/tower-rs/tower-http" }
+tower-grpc = { git = "https://github.com/tower-rs/tower-grpc" }
+tower-service = { git = "https://github.com/tower-rs/tower" }
+pnet = "*"
+pnetlink = "*"
