@@ -3,33 +3,41 @@ extern crate pnetlink;
 
 use std::net::IpAddr;
 use pnet::util::MacAddr;
+use pnetlink::packet::netlink::NetlinkConnection;
+use pnetlink::packet::route::link::{Links,Link, OperState, IfType, LinkType};
+use pnetlink::packet::route::addr::{Addresses,Addr};
+use netns::NetNS;
+
 
 /// Store the parts of a linux Link (interface) that we care about
 #[derive(Debug, PartialEq, Eq, Serialize)]
-struct Intf {
-    name: String,
-    ifindex: u16,
+pub struct Intf {
+    ifindex: u32,
+    iftype: IfType,
+    linktype: LinkType,
+    state: OperState,
+    name: Option<String>,
     peer_ifindex: Option<u16>,
-    mtu: u16,
-    kind: IntfKind,
+    mtu: Option<u32>,
     mac_address: Option<MacAddr>,
-    ip_address: Option<IpAddr>,
+    ip_addresses: Vec<IPAddress>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
-enum IntfKind {
+pub enum IntfKind {
     Veth,
     Macvlan(MacVlanInfo),
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
-struct MacVlanInfo {
+pub struct MacVlanInfo {
     mode: MacVlanMode,
+    master: String
 
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
-enum MacVlanMode {
+pub enum MacVlanMode {
     VEPA,
     Bridge,
     Passthru,
@@ -44,21 +52,17 @@ pub enum ContainerRuntime {
 #[derive(Debug, Serialize)]
 pub struct Container {
     pub id: String,
-    pub pid: u32,
-    pub node_name: Option<String>,
+    pub pid: i32,
+    node_name: Option<String>,
     pub runtime: ContainerRuntime,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
-struct VethIntf {
-    name: String,
-    ifindex: u16,
-    peer_ifindex: u16,
-    mtu: u16,
-    mac_address: String,
-    bridge: Option<String>,
-    ip_address: Option<String>,
+#[derive(Debug, Serialize)]
+pub struct IPAddress {
+    pub ip: IpAddr,
+    pub prefix_len: u8
 }
+
 
 impl Container {
     fn new(id: String, runtime: ContainerRuntime) -> Result<Self, Error> {
@@ -125,3 +129,48 @@ fn run_host_cmd(cmd: &str) -> Result<String, Error> {
         })?
     }
 }
+
+
+/// Retrieve all interfaces in the given netns if specified or the default one otherwise
+pub fn get_intfs(netns_pid: Option<i32>) -> Result<Vec<Intf>, Error> {
+    intfs = vec![];
+
+    if let Some(pid) = netns_pid {
+        let ns = NetNS::get_from_process(pid).unwrap();
+        debug!("fetching all interfaces in netns {:#?}", &ns);
+        NetNS::set(ns)?;
+    }
+
+    let mut conn = NetlinkConnection::new();
+    let links = conn.iter_links().unwrap().collect::<Vec<_>>();
+    for link in links {
+        let mut ip_addrs = vec![];
+        for addr in conn.get_link_addrs(None, &link).unwrap() {
+            let addr = IPAddress{
+                ip: addr.get_ip(),
+                prefix_len: addr.get_prefix_len(),
+            }:
+            ip_addrs.push(addr);
+        }
+
+        let intf = Intf {
+            ifindex: link.get_index(),
+            iftype: link.get_type(),
+            state: link.get_state(),
+            name: link.get_name(),
+            peer_ifindex: Option<u16>,
+            mtu: link.get_mtu(),
+            kind: IntfKind,
+            mac_address: link.get_hw_addr(),
+            ip_addresses: ip_addrs,
+        }
+    }
+
+}
+
+/// Retrieve the interface with the given id in the given netns
+/// if specified or the default one otherwise
+pub fn get_intf(netns_pid: Option<i32>) -> Result<Vec<Intf>, Error> {
+    unimplemented!()
+}
+

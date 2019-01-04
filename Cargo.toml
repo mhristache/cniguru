@@ -57,3 +57,5 @@ tower-grpc = { git = "https://github.com/tower-rs/tower-grpc" }
 tower-service = { git = "https://github.com/tower-rs/tower" }
 pnet = "*"
 pnetlink = "*"
+netns = { git = "https://github.com/achanda/netns" }
+
