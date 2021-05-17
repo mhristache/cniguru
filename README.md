@@ -145,6 +145,4 @@ Future plans
 
 Some features that might be added in the future:
 
-* run `cniguru` as a kubernetes `daemonset` (server side) and access it via a REST API (client side)
-* add possibility to trace packets on different interfaces and different nodes
-* add possibility to enable packet logging
+* TBD
