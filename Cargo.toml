@@ -17,10 +17,6 @@ license = "Apache-2.0/MIT"
 [build-dependencies]
 vergen = "0.1.0"
 
-[workspace]
-members = ["cniguru-daemon"]
-
-
 [dependencies]
 docopt = "1.0"
 log = "0.4"
